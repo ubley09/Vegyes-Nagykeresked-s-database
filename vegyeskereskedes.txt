@@ -1,0 +1,400 @@
+-aruhazak:
+id_aruhaz int 11 ai.
+aruhaz_telepules varchar 30
+aruhaz_cim varchar 30
+
+-raktar:
+id_raktar int 11
+id_aruhaz int 11 fk
+id_termek int 11 fk
+termek_mennyiseg int 5
+utolso_szallitas date
+
+-termekek:
+id_termek int 11 ai.
+termek_nev varchar 20
+termek_tipus varchar 20
+termek_leiras varchar 512
+termek_ar int 5
+
+-penz:
+id_penz int 11
+id_aruhaz int 11 fk
+bevetel int 8
+kiadas int 8
+datum date
+
+-munkasok:
+id_munkas int 11 ai.
+id_aruhaz int 11 fk
+id_munka int 11 fk
+jmbg varchar 13
+munkas_vezeteknev varchar 20
+munkas_keresztnev varchar 20
+munkas_telepules varchar 20
+munkas_cim varchar 30
+
+-munkak:
+id_munka int 11 ai.
+munka_nev varchar 20
+munka_leiras varchar 200
+munka_fizetes int 6
+munka_ora int 2
+
+---------------Stored Procedures:
+
+DROP PROCEDURE IF EXISTS vasarlas;
+DELIMITER //
+CREATE PROCEDURE vasarlas (IN aruhaz_id INT(11), IN termek_id INT(11), IN mennyiseg INT(3))
+BEGIN
+
+    DECLARE t_mennyiseg INT(5);
+    DECLARE id_a, id_t, d BOOLEAN;
+    
+    SELECT termek_mennyiseg INTO t_mennyiseg
+    FROM raktar
+    WHERE id_aruhaz = aruhaz_id AND id_termek = termek_id;
+    
+    SELECT EXISTS(SELECT id_aruhaz FROM aruhazak WHERE id_aruhaz = aruhaz_id)
+    INTO id_a;
+    
+    SELECT EXISTS(SELECT id_termek FROM termekek WHERE id_termek = termek_id)
+    INTO id_t;
+
+    IF t_mennyiseg >= mennyiseg AND id_a AND id_t THEN
+        UPDATE raktar
+        SET termek_mennyiseg = termek_mennyiseg - mennyiseg
+        WHERE id_aruhaz = aruhaz_id AND id_termek = termek_id;
+        
+        SELECT EXISTS(SELECT datum FROM penz
+        WHERE id_aruhaz = aruhaz_id AND datum = CURDATE())
+        INTO d;
+        
+        IF d THEN
+            UPDATE penz
+            SET bevetel = bevetel + vasarlas_ara(termek_id, mennyiseg)
+            WHERE id_aruhaz = aruhaz_id AND datum = CURDATE();
+        ELSE
+            INSERT INTO penz (id_aruhaz, bevetel, kiadas, datum)
+            VALUES (aruhaz_id, vasarlas_ara(termek_id, mennyiseg), 0, CURDATE());
+        END IF;
+        SELECT raktar.id_aruhaz, raktar.termek_mennyiseg, termekek.termek_nev, termekek.termek_ar, penz.bevetel, raktar.utolso_szallitas
+        FROM raktar
+        JOIN termekek ON termekek.id_termek = raktar.id_termek
+        JOIN penz ON penz.id_aruhaz = raktar.id_aruhaz
+        WHERE raktar.id_aruhaz = aruhaz_id AND raktar.id_termek = termek_id AND penz.datum = CURDATE();
+    ELSE
+        SELECT "NEM TORTENT SEMMI SEM" AS "HIBA";
+    END IF;
+    
+END//
+DELIMITER ;
+
+-------------------------------------------------
+
+DELIMITER //
+CREATE PROCEDURE beszallitas (IN aruhaz_id INT(11), IN termek_id INT(11), IN mennyiseg INT(3))
+BEGIN
+    
+    DECLARE id_a, id_t, d BOOLEAN;
+    
+    SELECT EXISTS(SELECT id_aruhaz FROM aruhazak WHERE id_aruhaz = aruhaz_id)
+    INTO id_a;
+    
+    SELECT EXISTS(SELECT id_termek FROM termekek WHERE id_termek = termek_id)
+    INTO id_t;
+    
+    IF id_a AND id_t THEN
+        SELECT EXISTS(SELECT id_termek FROM raktar
+        WHERE id_aruhaz = aruhaz_id AND id_termek = termek_id)
+        INTO id_t;
+    
+        IF id_t THEN    
+            UPDATE raktar
+            SET termek_mennyiseg = termek_mennyiseg + mennyiseg,
+                utolso_szallitas = CURDATE()
+            WHERE id_aruhaz = aruhaz_id AND id_termek = termek_id;
+        ELSE
+            INSERT INTO raktar (id_aruhaz, id_termek, termek_mennyiseg, utolso_szallitas)
+            VALUES (aruhaz_id, termek_id, mennyiseg, CURDATE());
+        END IF;
+
+        SELECT EXISTS(SELECT datum FROM penz
+        WHERE id_aruhaz = aruhaz_id AND datum = CURDATE())
+        INTO d;
+
+        IF d THEN
+            UPDATE penz
+            SET kiadas = kiadas + beszallitas_ara(termek_id, mennyiseg)
+            WHERE id_aruhaz = aruhaz_id AND datum = CURDATE();
+        ELSE
+            INSERT INTO penz (id_aruhaz, bevetel, kiadas, datum)
+            VALUES (aruhaz_id, 0, beszallitas_ara(termek_id, mennyiseg), CURDATE());
+        END IF;
+        SELECT raktar.id_aruhaz, raktar.termek_mennyiseg, termekek.termek_nev, termekek.termek_ar, penz.kiadas
+        FROM raktar
+        JOIN termekek ON termekek.id_termek = raktar.id_termek
+        JOIN penz ON penz.id_aruhaz = raktar.id_aruhaz
+        WHERE raktar.id_aruhaz = aruhaz_id AND raktar.id_termek = termek_id AND penz.datum = CURDATE();
+    ELSE
+        SELECT "NEM TORTENT SEMMI SEM" AS "HIBA";
+    END IF;
+    
+END//
+DELIMITER ;
+
+---------------------------------------------------------------
+
+DELIMITER //
+CREATE PROCEDURE uj_aruhaz (IN telepules VARCHAR(20), IN cim VARCHAR(27), IN hazszam INT(3))
+BEGIN
+
+    INSERT INTO aruhazak (aruhaz_telepules, aruhaz_cim)
+    VALUES (telepules, CONCAT(cim, ', ', hazszam));
+    
+    SELECT * FROM aruhazak
+    ORDER BY id_aruhaz DESC LIMIT 1;
+
+END//
+DELIMITER ;
+
+---------------------------------------------------------------
+
+DELIMITER //
+CREATE PROCEDURE uj_termek (IN nev VARCHAR(20), IN tipus VARCHAR(20), IN leiras VARCHAR(512), IN ar INT(5))
+BEGIN
+
+    INSERT INTO termekek (termek_nev, termek_tipus, termek_leiras, termek_ar)
+    VALUES (nev, tipus, leiras, ar);
+    
+    SELECT * FROM termekek
+    ORDER BY id_termek DESC LIMIT 1;
+
+END//
+DELIMITER ;
+
+---------------------------------------------------------------
+
+DELIMITER //
+CREATE PROCEDURE uj_munkas (IN vezeteknev VARCHAR(20), IN keresztnev VARCHAR(20), IN JMBG BIGINT(13), IN telepules VARCHAR(20), IN cim VARCHAR(27), IN hazszam INT(3), IN aruhazid INT(11), IN munkaid INT(11))
+BEGIN
+
+    DECLARE id_a, id_m BOOLEAN;
+
+    SELECT EXISTS(SELECT id_aruhaz FROM aruhazak WHERE id_aruhaz = aruhazid)
+    INTO id_a;
+    
+    SELECT EXISTS(SELECT id_munka FROM munkak WHERE id_munka = munkaid)
+    INTO id_m;
+    
+    IF id_a AND id_M AND LENGTH(JMBG) = 13 THEN
+        INSERT INTO munkasok (id_aruhaz, id_munka, jmbg, munkas_vezeteknev, munkas_keresztnev, munkas_telepules, munkas_cim)
+        VALUES (aruhazid, munkaid, JMBG, vezeteknev, keresztnev, telepules, CONCAT(cim, ', ', hazszam));
+    
+        SELECT * FROM munkasok
+        ORDER BY id_munkas DESC LIMIT 1;
+    ELSE
+        SELECT "NEM TORTENT SEMMI SEM" AS "HIBA";
+    END IF;
+
+END//
+DELIMITER ;
+
+---------------------------------------------------------------
+
+DELIMITER //
+CREATE PROCEDURE aruhaz_info_where (IN aruhaz_id INT(11))
+BEGIN
+
+    SELECT * FROM aruhaz_info
+    WHERE aruhaz_info.id_aruhaz = aruhaz_id;
+
+END//
+DELIMITER ;
+
+---------------------------------------------------------------
+
+DELIMITER //
+CREATE PROCEDURE munkas_info_where (IN aruhaz_id INT(11), IN vezeteknev VARCHAR(20), IN keresztnev VARCHAR(20),
+                                    IN telepules VARCHAR(20), IN munka VARCHAR(20))
+BEGIN
+
+    SELECT * FROM munkas_info
+    WHERE
+        (aruhaz_id IS NULL OR id_aruhaz = aruhaz_id) AND 
+        (vezeteknev IS NULL OR munkas_vezeteknev LIKE CONCAT('%', vezeteknev, '%')) AND
+        (keresztnev IS NULL OR munkas_keresztnev LIKE CONCAT('%', keresztnev, '%')) AND
+        (telepules IS NULL OR munkas_telepules LIKE CONCAT('%', telepules, '%')) AND
+        (munka IS NULL OR munka_nev LIKE CONCAT('%', munka, '%'));
+
+END//
+DELIMITER ;
+
+CALL munkas_info_where(null, null, null, null, null)
+
+---------------------------------------------------------------
+
+DELIMITER //
+CREATE PROCEDURE aruhazraktar_info_where (IN aruhaz_id INT(11), IN tnev VARCHAR(20), IN tipus VARCHAR(20))
+BEGIN
+
+    SELECT * FROM aruhaz_raktarinfo
+    WHERE
+        (aruhaz_id IS NULL OR id_aruhaz = aruhaz_id) AND
+        (tnev IS NULL OR termek_nev LIKE CONCAT('%', tnev, '%')) AND
+        (tipus IS NULL OR termek_tipus LIKE CONCAT('%', tipus, '%'));
+
+END//
+DELIMITER ;
+
+---------------Stored Functions:
+
+DELIMITER //
+CREATE FUNCTION vasarlas_ara (termek_id INT(11), mennyiseg INT(3))
+RETURNS INT(8) DETERMINISTIC
+BEGIN
+    DECLARE ar INT(6);
+    SELECT termek_ar INTO ar
+    FROM termekek
+    WHERE id_termek = termek_id;
+    SET ar = ar*mennyiseg;
+    RETURN ar;
+END //
+DELIMITER ; 
+
+----------------------------------------------------------------------------
+
+DELIMITER //
+CREATE FUNCTION beszallitas_ara (termek_id INT(11), mennyiseg INT(3))
+RETURNS INT(8) DETERMINISTIC
+BEGIN
+    DECLARE ar INT(6);
+    SELECT termek_ar INTO ar
+    FROM termekek
+    WHERE id_termek = termek_id;
+    SET ar = (ar*mennyiseg)/2;
+    RETURN ar;
+END //
+DELIMITER ; 
+
+
+---------------Triggers:
+
+CREATE TRIGGER insert_name_upper
+BEFORE INSERT ON munkasok
+FOR EACH ROW
+SET NEW.munkas_vezeteknev = UPPER(NEW.munkas_vezeteknev),
+    NEW.munkas_keresztnev = UPPER(NEW.munkas_keresztnev),
+    NEW.munkas_cim = UPPER(NEW.munkas_cim),
+    NEW.munkas_telepules = UPPER(NEW.munkas_telepules);
+
+CREATE TRIGGER update_name_upper
+BEFORE UPDATE ON munkasok
+FOR EACH ROW
+SET NEW.munkas_vezeteknev = UPPER(NEW.munkas_vezeteknev),
+    NEW.munkas_keresztnev = UPPER(NEW.munkas_keresztnev),
+    NEW.munkas_cim = UPPER(NEW.munkas_cim),
+    NEW.munkas_telepules = UPPER(NEW.munkas_telepules);
+
+------------------------
+
+CREATE TRIGGER insert_munkanev_upper
+BEFORE INSERT ON munkak
+FOR EACH ROW
+SET NEW.munka_nev = UPPER(NEW.munka_nev);
+
+CREATE TRIGGER update_munkanev_upper
+BEFORE UPDATE ON munkak
+FOR EACH ROW
+SET NEW.munka_nev = UPPER(NEW.munka_nev);
+
+------------------------
+
+CREATE TRIGGER insert_termekeknev_upper
+BEFORE INSERT ON termekek
+FOR EACH ROW
+SET NEW.termek_nev = UPPER(NEW.termek_nev),
+    NEW.termek_tipus = UPPER(NEW.termek_tipus);
+
+CREATE TRIGGER update_termekeknev_upper
+BEFORE UPDATE ON termekek
+FOR EACH ROW
+SET NEW.termek_nev = UPPER(NEW.termek_nev),
+    NEW.termek_tipus = UPPER(NEW.termek_tipus);
+
+------------------------
+
+CREATE TRIGGER insert_aruhaz_upper
+BEFORE INSERT ON aruhazak
+FOR EACH ROW
+SET NEW.aruhaz_telepules = UPPER(NEW.aruhaz_telepules),
+    NEW.aruhaz_cim = UPPER(NEW.aruhaz_cim);
+
+CREATE TRIGGER update_aruhaz_upper
+BEFORE UPDATE ON aruhazak
+FOR EACH ROW
+SET NEW.aruhaz_telepules = UPPER(NEW.aruhaz_telepules),
+    NEW.aruhaz_cim = UPPER(NEW.aruhaz_cim);
+
+---------------Views:
+
+CREATE VIEW aruhaz_raktarinfo AS
+SELECT raktar.id_aruhaz, termekek.id_termek, termekek.termek_nev, termekek.termek_tipus, termekek.termek_ar, raktar.termek_mennyiseg, raktar.utolso_szallitas
+FROM raktar
+JOIN termekek ON termekek.id_termek = raktar.id_termek
+
+------------------------
+
+CREATE VIEW aruhaz_info AS
+SELECT aruhazak.id_aruhaz, aruhazak.aruhaz_telepules, aruhazak.aruhaz_cim,
+SUM(DISTINCT raktar.termek_mennyiseg) AS "termek_mennyiseg", SUM(DISTINCT penz.bevetel) AS "bevetel", SUM(DISTINCT penz.kiadas) AS "kiadas",
+((SUM(DISTINCT penz.bevetel)) - (SUM(DISTINCT penz.kiadas))) AS "jovedelem"
+FROM aruhazak
+JOIN raktar ON raktar.id_aruhaz = aruhazak.id_aruhaz
+JOIN penz ON penz.id_aruhaz = aruhazak.id_aruhaz
+GROUP BY aruhazak.id_aruhaz
+
+------------------------
+
+CREATE VIEW munkas_info AS
+SELECT munkasok.id_aruhaz, munkasok.munkas_vezeteknev, munkasok.munkas_keresztnev, munkasok.munkas_telepules, munkak.munka_nev, munkak.munka_fizetes
+FROM munkasok
+JOIN munkak ON munkak.id_munka = munkasok.id_munka
+ORDER BY munkasok.id_aruhaz
+
+
+
+
+CALL beszallitas(1,1,1)
+CALL vasarlas(1,1,1)
+CALL uj_munkas("Fodor", "Sándor", 2592541479679, "Kanjiža", "Adi Endre", 5, 1, 1)
+CALL aruhaz_info_where(null)
+CALL munkas_info_where(null, null, null, null, null)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
